@@ -14,12 +14,17 @@ id "$APP_USER" >/dev/null
 install -d -o "$APP_USER" -g "$APP_USER" -m 755 "$APP_DIR" "$APP_DIR/releases" "$APP_DIR/incoming"
 install -d -o "$APP_USER" -g "$APP_USER" -m 700 "$APP_DIR/shared"
 
-# CI key, restricted to running commands (no port forwarding, agent or pty).
-KEY="restrict $(cat "$PUBKEY_FILE")"
+# CI key: commands plus a tunnel to local Postgres only (for migrations); no other
+# forwarding, agent or pty. Re-running replaces the key's line so options stay current.
+KEY_BODY=$(awk '{print $2}' "$PUBKEY_FILE")
+[[ "$KEY_BODY" == AAAA* ]] || { echo "not an SSH public key: $PUBKEY_FILE" >&2; exit 1; }
+KEY="restrict,port-forwarding,permitopen=\"127.0.0.1:5432\" $(cat "$PUBKEY_FILE")"
 AUTH=/home/$APP_USER/.ssh/authorized_keys
 install -d -m 700 -o "$APP_USER" -g "$APP_USER" /home/$APP_USER/.ssh
 touch "$AUTH" && chown "$APP_USER:$APP_USER" "$AUTH" && chmod 600 "$AUTH"
-grep -qF "$(awk '{print $2}' "$PUBKEY_FILE")" "$AUTH" || echo "$KEY" >> "$AUTH"
+grep -vF "$KEY_BODY" "$AUTH" > "$AUTH.tmp" || true
+echo "$KEY" >> "$AUTH.tmp"
+install -m 600 -o "$APP_USER" -g "$APP_USER" "$AUTH.tmp" "$AUTH" && rm -f "$AUTH.tmp"
 
 # Let the deploy user restart only this service.
 cat > /etc/sudoers.d/planit-deploy <<SUDO

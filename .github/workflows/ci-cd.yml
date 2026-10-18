@@ -120,13 +120,6 @@ jobs:
         with:
           name: planit-release
 
-      - name: Run database migrations
-        run: |
-          npm ci --no-audit --no-fund --ignore-scripts
-          npm run db:migrate
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
       - name: Configure SSH
         run: |
           install -d -m 700 ~/.ssh
@@ -134,6 +127,17 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           echo "${{ secrets.VM_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           echo "VM=${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" >> "$GITHUB_ENV"
+
+      - name: Run database migrations (through an SSH tunnel; Postgres is localhost-only on the VM)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          ssh -i ~/.ssh/id_ed25519 -f -N -o ExitOnForwardFailure=yes -L 15432:127.0.0.1:5432 "$VM"
+          TUNNEL_URL=$(node -e 'const u = new URL(process.env.DATABASE_URL); u.hostname = "127.0.0.1"; u.port = "15432"; console.log(u.href)')
+          echo "::add-mask::$TUNNEL_URL"
+          DATABASE_URL="$TUNNEL_URL" npm run db:migrate
+          pkill -f "15432:127.0.0.1:5432" || true
 
       - name: Upload release and environment
         env:

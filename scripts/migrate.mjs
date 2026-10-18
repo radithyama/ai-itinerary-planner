@@ -1,12 +1,18 @@
 // Applies pending SQL migrations from ./migrations. Run by CI before each deploy.
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
-import { migrate } from "drizzle-orm/neon-http/migrator";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import pg from "pg";
 
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set");
   process.exit(1);
 }
 
-await migrate(drizzle(neon(process.env.DATABASE_URL)), { migrationsFolder: "./migrations" });
-console.log("Migrations up to date");
+const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+await client.connect();
+try {
+  await migrate(drizzle(client), { migrationsFolder: "./migrations" });
+  console.log("Migrations up to date");
+} finally {
+  await client.end();
+}
