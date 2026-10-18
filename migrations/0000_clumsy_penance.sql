@@ -1,4 +1,4 @@
-CREATE TABLE "plans" (
+CREATE TABLE IF NOT EXISTS "plans" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"text" text NOT NULL,
 	"budget" integer NOT NULL,
