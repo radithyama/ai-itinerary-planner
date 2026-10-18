@@ -2,7 +2,7 @@
 
 AI travel itinerary planner. Pick a destination (or let it surprise you), your dates, group size, pace, budget and interests, and Planit builds a day-by-day itinerary with times, costs, map links and local tips.
 
-Live: https://radithyama.site/planit
+Live: https://planit.radithyama.site
 
 ## Features
 
@@ -33,7 +33,7 @@ npm run dev
 | `GEMINI_API_KEY` | yes | From Google AI Studio |
 | `GEMINI_MODEL` | no | Defaults to `gemini-3.8-flash` |
 | `PLANIT_DAILY_LIMIT` | no | New plans per user per 24 hours, default 10 |
-| `NEXT_PUBLIC_BASE_PATH` | no | Serve under a sub-path such as `/planit` (build time) |
+| `NEXT_PUBLIC_BASE_PATH` | no | Serve under a sub-path such as `/planit` (build time); not used in production |
 
 ## Scripts
 
@@ -50,7 +50,7 @@ npm run dev
 Every push to `master` runs `.github/workflows/ci-cd.yml`:
 
 1. **Checks**: lint, typecheck, unit tests
-2. **Build**: `next build` with `NEXT_PUBLIC_BASE_PATH=/planit`, packs the standalone server, boots it and checks `/api/health`
+2. **Build**: `next build`, packs the standalone server, boots it and checks `/api/health`
 3. **Deploy** (master only):
    - runs database migrations through an SSH tunnel (Postgres only listens on the VM's localhost)
    - uploads the release to `portfolio-vm` over SSH and writes the environment file from GitHub secrets
@@ -72,7 +72,8 @@ Variables: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (required), `GEMINI_MODEL`, `PLAN
 /opt/planit/current           symlink to the active release
 /opt/planit/shared/.env       written by CI on each deploy (mode 600)
 /etc/systemd/system/planit.service      node server.js on localhost:3001, MemoryMax=512M
-/etc/nginx/snippets/planit*.conf        /planit locations, included in the portfolio's HTTPS server block
+/etc/nginx/sites-available/planit       planit.radithyama.site (Let's Encrypt via webroot, auto-renewed)
+/etc/nginx/snippets/planit.conf         301s radithyama.site/planit/* to the subdomain (included by the portfolio)
 PostgreSQL 15, database `planit`         localhost only, tuned for the e2-small
 /var/backups/planit/                    nightly pg_dump at 03:15, 7 days kept
 ```

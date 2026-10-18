@@ -13,8 +13,7 @@ concurrency:
 env:
   NODE_VERSION: 22
   NEXT_TELEMETRY_DISABLED: 1
-  BASE_PATH: /planit
-  PUBLIC_URL: https://radithyama.site/planit
+  PUBLIC_URL: https://planit.radithyama.site
 
 jobs:
   checks:
@@ -36,7 +35,6 @@ jobs:
     needs: checks
     runs-on: ubuntu-latest
     env:
-      NEXT_PUBLIC_BASE_PATH: /planit
       # Publishable keys are public. PR builds fall back to a placeholder so they don't need repo config.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_live_Y2xlcmsuZXhhbXBsZS5jb20k' }}
     steps:
@@ -67,7 +65,7 @@ jobs:
           cd .next/standalone
           PORT=3001 HOSTNAME=localhost APP_VERSION=ci DATABASE_URL=postgresql://u:p@localhost/db node server.js > ../../server.log 2>&1 &
           for i in {1..20}; do
-            if curl -fsS http://localhost:3001/planit/api/health | grep -q '"status":"ok"'; then echo "Server booted"; exit 0; fi
+            if curl -fsS http://localhost:3001/api/health | grep -q '"status":"ok"'; then echo "Server booted"; exit 0; fi
             sleep 1
           done
           cat ../../server.log; exit 1

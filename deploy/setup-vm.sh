@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # One-time (idempotent) setup for Planit on the portfolio VM, next to the existing portfolio.
+# Serves https://planit.radithyama.site (DNS A record -> VM) and redirects radithyama.site/planit.
 # Usage (on the VM, as root): bash setup-vm.sh <deploy-public-key-file>
 # Expects the portfolio's setup to have run already: Node 22, nginx + TLS, swap, `deploy` user.
 set -euo pipefail
@@ -9,6 +10,8 @@ APP_USER=deploy
 APP_DIR=/opt/planit
 SRC="$(cd "$(dirname "$0")" && pwd)"
 NGINX_SITE=/etc/nginx/sites-available/portfolio
+DOMAIN=planit.radithyama.site
+SITE=/etc/nginx/sites-available/planit
 
 id "$APP_USER" >/dev/null
 install -d -o "$APP_USER" -g "$APP_USER" -m 755 "$APP_DIR" "$APP_DIR/releases" "$APP_DIR/incoming"
@@ -37,21 +40,52 @@ install -m 644 "$SRC/planit.service" /etc/systemd/system/planit.service
 systemctl daemon-reload
 systemctl enable planit   # started by the first deploy, once a release exists
 
-# nginx: add Planit's locations to the portfolio's HTTPS server block.
-install -m 644 "$SRC/nginx-planit.conf" /etc/nginx/snippets/planit.conf
+# nginx: Planit gets its own server block on planit.radithyama.site.
+reload_nginx_or_restore() { # restores the given backups if the new config doesn't pass nginx -t
+  if nginx -t; then
+    systemctl reload nginx
+  else
+    echo "nginx config test failed, restoring previous config" >&2
+    for f in "$@"; do
+      if [[ -f "$f.bak" ]]; then
+        mv "$f.bak" "$f"
+      elif [[ "$f" == "$SITE" ]]; then
+        rm -f "$SITE" /etc/nginx/sites-enabled/planit   # brand-new Planit site: just drop it
+      fi                                                # never delete anything else
+    done
+    nginx -t && systemctl reload nginx
+    exit 1
+  fi
+}
+
 install -m 644 "$SRC/nginx-planit-proxy.conf" /etc/nginx/snippets/planit-proxy.conf
+install -d -m 755 /var/www/letsencrypt
+
+# 1. Certificate. Port 80 only first, then a webroot challenge so nginx (and the
+#    portfolio) never stops. Renewals reuse the webroot through certbot's timer.
+if [[ ! -d "/etc/letsencrypt/live/$DOMAIN" ]]; then
+  [[ -f "$SITE" ]] && cp "$SITE" "$SITE.bak"
+  install -m 644 "$SRC/nginx-planit-http.conf" "$SITE"
+  ln -sf "$SITE" /etc/nginx/sites-enabled/planit
+  reload_nginx_or_restore "$SITE"
+  certbot certonly --webroot -w /var/www/letsencrypt -d "$DOMAIN" --non-interactive \
+    --deploy-hook "systemctl reload nginx"
+fi
+
+# 2. Full site (HTTP redirect + HTTPS proxy).
+[[ -f "$SITE" ]] && cp "$SITE" "$SITE.bak"
+install -m 644 "$SRC/nginx-planit-site.conf" "$SITE"
+ln -sf "$SITE" /etc/nginx/sites-enabled/planit
+
+# 3. Old radithyama.site/planit links redirect to the subdomain. The portfolio's
+#    HTTPS block includes snippets/planit.conf (added on first setup).
+cp /etc/nginx/snippets/planit.conf /etc/nginx/snippets/planit.conf.bak 2>/dev/null || true
+install -m 644 "$SRC/nginx-planit-redirect.conf" /etc/nginx/snippets/planit.conf
 if ! grep -q "snippets/planit.conf" "$NGINX_SITE"; then
-  cp "$NGINX_SITE" "$NGINX_SITE.bak-$(date +%Y%m%d%H%M%S)"
-  # Insert right after the ssl_session_cache line of the 443 server block.
+  cp "$NGINX_SITE" "$NGINX_SITE.bak"
   sed -i '/ssl_session_cache/a\    include snippets/planit.conf;' "$NGINX_SITE"
 fi
-if nginx -t; then
-  systemctl reload nginx
-else
-  latest=$(ls -t "$NGINX_SITE".bak-* | head -1)
-  echo "nginx config test failed, restoring $latest" >&2
-  cp "$latest" "$NGINX_SITE"
-  nginx -t && systemctl reload nginx
-  exit 1
-fi
+reload_nginx_or_restore "$SITE" /etc/nginx/snippets/planit.conf "$NGINX_SITE"
+rm -f "$SITE.bak" /etc/nginx/snippets/planit.conf.bak "$NGINX_SITE.bak"
+
 echo "Planit VM setup complete."

@@ -7,7 +7,7 @@ set -euo pipefail
 SHA="${1:?release sha}"
 APP_DIR=/opt/planit
 RELEASE="$APP_DIR/releases/$SHA"
-HEALTH="http://localhost:3001/planit/api/health?deep=1"
+HEALTH="http://localhost:3001/api/health?deep=1"
 KEEP=3
 
 cd "$APP_DIR"
