@@ -4,6 +4,7 @@ import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import Header from "@/components/ui/header";
+import { withBasePath } from "@/lib/base-path";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -29,9 +30,12 @@ export default function RootLayout({
   return (
     <ClerkProvider
       appearance={{ baseTheme: dark }}
-      signInUrl="/sign-in"
-      signUpUrl="/sign-up"
-      afterSignOutUrl="/"
+      // Clerk turns these into absolute URLs itself, so they need the /planit base path.
+      signInUrl={withBasePath("/sign-in")}
+      signUpUrl={withBasePath("/sign-up")}
+      signInFallbackRedirectUrl={withBasePath("/travel-planner")}
+      signUpFallbackRedirectUrl={withBasePath("/travel-planner")}
+      afterSignOutUrl={withBasePath("/")}
     >
       <html lang="en" className="dark">
       <body

@@ -1,4 +1,5 @@
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import HeaderSignIn from "./header-sign-in";
 import React from "react";
 import { GiAstronautHelmet } from 'react-icons/gi';
 import Link from 'next/link';
@@ -17,9 +18,7 @@ export default function Header() {
         </Link>
         <nav className='flex items-center gap-2 sm:gap-4'>
         <SignedOut>
-          <SignInButton mode="modal">
-            <Button variant="outline">Sign in</Button>
-          </SignInButton>
+          <HeaderSignIn />
         </SignedOut>
         <SignedIn>
           <Button asChild variant="ghost">

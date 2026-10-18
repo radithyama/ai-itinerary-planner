@@ -1,7 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import { SYSTEM_INSTRUCTION } from "@/lib/itinerary";
+import { jsonGenerationConfig, SYSTEM_INSTRUCTION } from "@/lib/itinerary";
 
 const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.8-flash";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
@@ -24,9 +24,7 @@ export async function generateJson<T extends z.ZodTypeAny>(
   const body = JSON.stringify({
     systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseFormat: { text: { mimeType: "application/json", schema: jsonSchema } },
-    },
+    generationConfig: jsonGenerationConfig(jsonSchema),
   });
 
   // One retry for transient overload errors.

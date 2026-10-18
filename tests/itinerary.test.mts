@@ -4,7 +4,9 @@ import {
   buildDayPrompt,
   buildItineraryPrompt,
   formatMoney,
+  itineraryJsonSchema,
   itinerarySchema,
+  jsonGenerationConfig,
   legacyHtmlToLines,
   totalCost,
   tripDates,
@@ -113,4 +115,11 @@ test("formatMoney formats per currency", () => {
 test("legacyHtmlToLines strips markup, including scripts and handlers", () => {
   const html = '<b>Day 1</b><ul><li>Visit &amp; eat</li><li><img src=x onerror="alert(1)">Museum</li></ul><script>alert(2)</script>';
   assert.deepEqual(legacyHtmlToLines(html), ["Day 1", "• Visit & eat", "• Museum"]);
+});
+
+test("jsonGenerationConfig uses responseMimeType + responseJsonSchema (responseFormat.text.mimeType is rejected)", () => {
+  const config = jsonGenerationConfig(itineraryJsonSchema);
+  assert.deepEqual(Object.keys(config).sort(), ["responseJsonSchema", "responseMimeType"]);
+  assert.equal(config.responseMimeType, "application/json");
+  assert.equal(config.responseJsonSchema, itineraryJsonSchema);
 });
