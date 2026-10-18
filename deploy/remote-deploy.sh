@@ -30,7 +30,8 @@ for _ in {1..30}; do
   if [[ "$body" == *'"status":"ok"'* && "$body" == *"\"version\":\"$SHA\""* ]]; then
     echo "Release $SHA is healthy: $body"
     # Prune old releases, never the active one.
-    ls -1dt releases/*/ | tail -n +$((KEEP + 1)) | grep -v "$SHA" | xargs -r rm -rf
+    # (grep finds nothing to prune on the first few deploys, so don't let pipefail turn that into a failure)
+    ls -1dt releases/*/ | tail -n +$((KEEP + 1)) | { grep -v "$SHA" || true; } | xargs -r rm -rf
     exit 0
   fi
 done
