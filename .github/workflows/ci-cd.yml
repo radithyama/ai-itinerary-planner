@@ -1,0 +1,167 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: 22
+  NEXT_TELEMETRY_DISABLED: 1
+  BASE_PATH: /planit
+  PUBLIC_URL: https://radithyama.site/planit
+
+jobs:
+  checks:
+    name: Lint, typecheck & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  build:
+    name: Build & boot test
+    needs: checks
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_BASE_PATH: /planit
+      # Publishable keys are public. PR builds fall back to a placeholder so they don't need repo config.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_live_Y2xlcmsuZXhhbXBsZS5jb20k' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'components/**', 'lib/**', 'server/**', 'db/**') }}
+          restore-keys: nextjs-${{ hashFiles('package-lock.json') }}-
+      - run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build
+        env:
+          # Only needed so modules can be imported during the build; never used to connect.
+          DATABASE_URL: postgresql://build:build@localhost/build
+      - name: Assemble standalone release
+        run: |
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
+          tar -czf planit-release.tar.gz -C .next/standalone .
+          du -h planit-release.tar.gz
+      - name: Boot test
+        run: |
+          cd .next/standalone
+          PORT=3001 HOSTNAME=localhost APP_VERSION=ci DATABASE_URL=postgresql://u:p@localhost/db node server.js > ../../server.log 2>&1 &
+          for i in {1..20}; do
+            if curl -fsS http://localhost:3001/planit/api/health | grep -q '"status":"ok"'; then echo "Server booted"; exit 0; fi
+            sleep 1
+          done
+          cat ../../server.log; exit 1
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: planit-release
+          path: planit-release.tar.gz
+          retention-days: 7
+
+  deploy:
+    name: Deploy to portfolio-vm
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ env.PUBLIC_URL }}
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Check configuration
+        env:
+          HAS_VM_KEY: ${{ secrets.VM_SSH_KEY != '' }}
+          HAS_DB: ${{ secrets.DATABASE_URL != '' }}
+          HAS_CLERK: ${{ secrets.CLERK_SECRET_KEY != '' }}
+          HAS_GEMINI: ${{ secrets.GEMINI_API_KEY != '' }}
+          HAS_PK: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY != '' }}
+        run: |
+          missing=()
+          [[ "$HAS_VM_KEY" == true ]] || missing+=("secret VM_SSH_KEY")
+          [[ "$HAS_DB" == true ]] || missing+=("secret DATABASE_URL")
+          [[ "$HAS_CLERK" == true ]] || missing+=("secret CLERK_SECRET_KEY")
+          [[ "$HAS_GEMINI" == true ]] || missing+=("secret GEMINI_API_KEY")
+          [[ "$HAS_PK" == true ]] || missing+=("variable NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
+          if (( ${#missing[@]} )); then
+            for m in "${missing[@]}"; do echo "::error::Missing repository $m (Settings > Secrets and variables > Actions)"; done
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/download-artifact@v4
+        with:
+          name: planit-release
+
+      - name: Run database migrations
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          npm run db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Configure SSH
+        run: |
+          install -d -m 700 ~/.ssh
+          echo "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.VM_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          echo "VM=${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" >> "$GITHUB_ENV"
+
+      - name: Upload release and environment
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          PLANIT_DAILY_LIMIT: ${{ vars.PLANIT_DAILY_LIMIT }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+        run: |
+          scp -i ~/.ssh/id_ed25519 planit-release.tar.gz "$VM:/opt/planit/incoming/$SHA.tar.gz"
+          {
+            printf 'APP_VERSION=%s\n' "$SHA"
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'CLERK_SECRET_KEY=%s\n' "$CLERK_SECRET_KEY"
+            printf 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=%s\n' "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
+            printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY"
+            [[ -n "$GEMINI_MODEL" ]] && printf 'GEMINI_MODEL=%s\n' "$GEMINI_MODEL"
+            [[ -n "$PLANIT_DAILY_LIMIT" ]] && printf 'PLANIT_DAILY_LIMIT=%s\n' "$PLANIT_DAILY_LIMIT"
+            true
+          } | ssh -i ~/.ssh/id_ed25519 "$VM" "umask 077 && cat > /opt/planit/incoming/$SHA.env"
+
+      - name: Activate release (rolls back automatically if unhealthy)
+        run: ssh -i ~/.ssh/id_ed25519 "$VM" 'bash -s' -- "$SHA" < deploy/remote-deploy.sh
+
+      - name: Smoke test public URL
+        run: deploy/smoke.sh "$PUBLIC_URL" "$SHA" --deep
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

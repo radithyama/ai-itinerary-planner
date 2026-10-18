@@ -1,0 +1,32 @@
+[Unit]
+Description=Planit AI itinerary planner (Next.js standalone)
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/opt/planit/current
+# Written by CI on every deploy from GitHub secrets (DATABASE_URL, CLERK_SECRET_KEY, GEMINI_API_KEY, APP_VERSION...)
+EnvironmentFile=/opt/planit/shared/.env
+Environment=NODE_ENV=production
+Environment=PORT=3001
+# "localhost" (not 127.0.0.1) so Next's internal middleware proxy reaches the same listener
+Environment=HOSTNAME=localhost
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=NODE_OPTIONS=--max-old-space-size=320
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+
+# Shares an e2-small with the portfolio: keep Planit's memory bounded.
+MemoryHigh=400M
+MemoryMax=512M
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/planit
+
+[Install]
+WantedBy=multi-user.target
